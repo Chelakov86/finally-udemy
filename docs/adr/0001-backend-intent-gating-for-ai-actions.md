@@ -1,0 +1,3 @@
+# Backend Intent Gating for AI Actions
+
+FinAlly lets the AI assistant propose trades and watchlist changes, but model output is not permission to mutate state. The backend is the authoritative gate for user intent: it applies executable trade and watchlist actions only when the current user message is an explicit execution request or an unambiguous confirmation of a pending recommendation. This trades a slightly less automatic demo for deterministic safety, clearer tests, and protection against model mistakes or prompt-injection-style action proposals.

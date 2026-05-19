@@ -4,7 +4,7 @@
 
 ## 1. Vision
 
-FinAlly (Finance Ally) is a visually stunning AI-powered trading workstation that streams live market data, lets users trade a simulated portfolio, and integrates an LLM chat assistant that can analyze positions and execute trades on the user's behalf. It looks and feels like a modern Bloomberg terminal with an AI copilot.
+FinAlly (Finance Ally) is a visually stunning AI-powered paper trading workstation that streams live-updating prices, lets users trade a simulated portfolio, and integrates an LLM chat assistant that can analyze positions and execute trades on the user's behalf. It looks and feels like a modern Bloomberg terminal with an AI copilot.
 
 This is the capstone project for an agentic AI coding course. It is built entirely by Coding Agents demonstrating how orchestrated AI agents can produce a production-quality full-stack application. Agents interact through files in `planning/`.
 
@@ -21,20 +21,22 @@ The user runs a single Docker command (or a provided start script). A browser op
 
 ### What the User Can Do
 
-- **Watch prices stream** — prices flash green (uptick) or red (downtick) with subtle CSS animations that fade
+- **Watch prices stream** — simulated live prices or market prices flash green (uptick) or red (downtick) with subtle CSS animations that fade
 - **View sparkline mini-charts** — price action beside each ticker in the watchlist, accumulated on the frontend from the SSE stream since page load (sparklines fill in progressively)
 - **Click a ticker** to see a larger detailed chart in the main chart area
-- **Buy and sell shares** — market orders only, instant fill at current price, no fees, no confirmation dialog
+- **Buy and sell** — market orders only, entered by shares or dollar amount, instant fill at current price, no fees, no confirmation dialog after explicit user intent, no short selling
 - **Monitor their portfolio** — a heatmap (treemap) showing positions sized by weight and colored by P&L, plus a P&L chart tracking total portfolio value over time
 - **View a positions table** — ticker, quantity, average cost, current price, unrealized P&L, % change
-- **Chat with the AI assistant** — ask about their portfolio, get analysis, and have the AI execute trades and manage the watchlist through natural language
+- **Chat with the AI assistant** — ask about their portfolio, get analysis, and have the AI execute trades and manage the watchlist when explicitly requested or confirmed through natural language
 - **Manage the watchlist** — add/remove tickers manually or via the AI chat
+- Buying a ticker does not automatically add it to the watchlist; owned tickers are priced for valuation even when they are not watched
 
 ### Visual Design
 
 - **Dark theme**: backgrounds around `#0d1117` or `#1a1a2e`, muted gray borders, no pure black
 - **Price flash animations**: brief green/red background highlight on price change, fading over ~500ms via CSS transitions
 - **Connection status indicator**: a small colored dot (green = connected, yellow = reconnecting, red = disconnected) visible in the header
+- **Price source label**: simulator mode displays "Simulated live prices"; Massive mode displays "Market prices"
 - **Professional, data-dense layout**: inspired by Bloomberg/trading terminals — every pixel earns its place
 - **Responsive but desktop-first**: optimized for wide screens, functional on tablet
 
@@ -151,6 +153,7 @@ Both the simulator and the Massive client implement the same abstract interface.
 
 - Generates prices using geometric Brownian motion (GBM) with configurable drift and volatility per ticker
 - Updates at ~500ms intervals
+- Runs continuously while the app is running; it does not pause for real-world market hours
 - Correlated moves across tickers (e.g., tech stocks move together)
 - Occasional random "events" — sudden 2-5% moves on a ticker for drama
 - Starts from realistic seed prices (e.g., AAPL ~$190, GOOGL ~$175, etc.)
@@ -163,6 +166,17 @@ Both the simulator and the Massive client implement the same abstract interface.
 - Free tier (5 calls/min): poll every 15 seconds
 - Paid tiers: poll every 2-15 seconds depending on tier
 - Parses REST response into the same format as the simulator
+- Reflects provider data availability; if markets are closed or provider data is static, freshness/status handling communicates degraded or stale prices
+
+### Ticker Validation
+
+- User and AI ticker input is case-insensitive and normalized to uppercase
+- Valid v1 ticker format is `^[A-Z]{1,5}$`
+- Invalid symbols such as `BRK.B`, `BTC-USD`, and `7203.T` are rejected with a clear validation error
+- ETFs such as `SPY` and `QQQ` are valid if they match the same format
+- In simulator mode, any syntactically valid ticker can be added or traded because the simulator can generate a price
+- In Massive mode, adding or trading a ticker requires provider data; if no current price can be obtained, the operation fails with a clear validation error
+- Trade execution always requires a current price, regardless of market data source
 
 ### Shared Price Cache
 
@@ -170,12 +184,15 @@ Both the simulator and the Massive client implement the same abstract interface.
 - The cache holds the latest price, previous price, and timestamp for each ticker
 - SSE streams read from this cache and push updates to connected clients
 - This architecture supports future multi-user scenarios without changes to the data layer
+- Active market data coverage is the union of watchlist tickers and tickers with active positions, so portfolio valuation continues even if a user removes an owned ticker from the watchlist
+- Removing a held ticker from the watchlist is allowed. The ticker remains price-tracked until the position is fully sold; if it is neither watched nor held, market data coverage can stop.
+- Cached prices have freshness semantics. Display and portfolio valuation may use stale prices with degraded-state warnings, but trade execution requires a fresh price. Freshness threshold is 5 seconds in simulator mode and 60 seconds in Massive mode.
 
 ### SSE Streaming
 
 - Endpoint: `GET /api/stream/prices`
 - Long-lived SSE connection; client uses native `EventSource` API
-- Server pushes price updates for all tickers known to the system at a regular cadence (~500ms) — in the single-user model this is equivalent to the user's watchlist
+- Server pushes price updates for all priced tickers at a regular cadence (~500ms): the union of watchlist tickers and tickers with active positions
 - Each SSE event contains ticker, price, previous price, timestamp, and change direction
 - Client handles reconnection automatically (EventSource has built-in retry)
 
@@ -193,11 +210,11 @@ The backend checks for the SQLite database on startup (or first request). If the
 
 ### Schema
 
-All tables include a `user_id` column defaulting to `"default"`. This is hardcoded for now (single-user) but enables future multi-user support without schema migration.
+All tables include a `user_id` column defaulting to `"default"`. This is hardcoded for now (single-user) but enables future multi-user support without schema migration. V1 does not expose users, accounts, profiles, login, or signup in the UI or public API; all behavior assumes one implicit participant.
 
 **users_profile** — User state (cash balance)
 - `id` TEXT PRIMARY KEY (default: `"default"`)
-- `cash_balance` REAL (default: `10000.0`)
+- `cash_balance_cents` INTEGER (default: `1000000`)
 - `created_at` TEXT (ISO timestamp)
 
 **watchlist** — Tickers the user is watching
@@ -216,19 +233,29 @@ All tables include a `user_id` column defaulting to `"default"`. This is hardcod
 - `updated_at` TEXT (ISO timestamp)
 - UNIQUE constraint on `(user_id, ticker)`
 
-**trades** — Trade history (append-only log)
+Positions are long-only. Quantity can never be negative; sell requests that exceed the held quantity are rejected. When a sell reduces a position to exactly zero, the position row is deleted; the trade execution remains in the append-only `trades` table.
+
+Average cost uses weighted-average purchase price per share. Buying more of an existing position recalculates average cost; partial sells reduce quantity but leave average cost unchanged.
+
+V1 tracks unrealized P&L for active positions and total portfolio value over time. Realized P&L reporting is out of scope.
+
+Total portfolio value is `cash_balance + sum(position.quantity * current_price)`, persisted as integer cents. Held tickers should always be priced tickers. If a current price is missing for a held ticker, portfolio valuation should report a degraded/incomplete state rather than silently using zero or stale data.
+
+**trades** — Trade execution history (append-only log)
 - `id` TEXT PRIMARY KEY (UUID)
 - `user_id` TEXT (default: `"default"`)
 - `ticker` TEXT
 - `side` TEXT (`"buy"` or `"sell"`)
 - `quantity` REAL (fractional shares supported)
-- `price` REAL
+- `execution_price` TEXT (decimal string)
+- `notional_amount_cents` INTEGER (derived from `quantity * price` and rounded to cents)
+- `source` TEXT (`"manual"` or `"ai"`)
 - `executed_at` TEXT (ISO timestamp)
 
-**portfolio_snapshots** — Portfolio value over time (for P&L chart). Recorded every 30 seconds by a background task, and immediately after each trade execution.
+**portfolio_snapshots** — Portfolio value over time (for P&L chart). Recorded every 30 seconds by a background task, and immediately after each successful trade execution.
 - `id` TEXT PRIMARY KEY (UUID)
 - `user_id` TEXT (default: `"default"`)
-- `total_value` REAL
+- `total_value_cents` INTEGER
 - `recorded_at` TEXT (ISO timestamp)
 
 **chat_messages** — Conversation history with LLM
@@ -236,12 +263,14 @@ All tables include a `user_id` column defaulting to `"default"`. This is hardcod
 - `user_id` TEXT (default: `"default"`)
 - `role` TEXT (`"user"` or `"assistant"`)
 - `content` TEXT
-- `actions` TEXT (JSON — trades executed, watchlist changes made; null for user messages)
+- `actions` TEXT (JSON — action results for attempted trades and watchlist changes, including success/failure status; null for user messages)
 - `created_at` TEXT (ISO timestamp)
+
+Chat history persists in SQLite across container restarts. The UI may display persisted history, but LLM prompts should include only a bounded recent window, defaulting to the most recent 20 messages. Portfolio context is always loaded fresh from current state, not inferred from chat history.
 
 ### Default Seed Data
 
-- One user profile: `id="default"`, `cash_balance=10000.0`
+- One user profile: `id="default"`, `cash_balance_cents=1000000`
 - Ten watchlist entries: AAPL, GOOGL, MSFT, AMZN, TSLA, NVDA, META, JPM, V, NFLX
 
 ---
@@ -257,7 +286,7 @@ All tables include a `user_id` column defaulting to `"default"`. This is hardcod
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/portfolio` | Current positions, cash balance, total value, unrealized P&L |
-| POST | `/api/portfolio/trade` | Execute a trade: `{ticker, quantity, side}` |
+| POST | `/api/portfolio/trade` | Execute a trade request: `{ticker, side, quantity}` or `{ticker, side, notional_amount}` |
 | GET | `/api/portfolio/history` | Portfolio value snapshots over time (for P&L chart) |
 
 ### Watchlist
@@ -292,13 +321,14 @@ Use `gemma-4-31b-it` as the LLM model.
 When the user sends a chat message, the backend:
 
 1. Loads the user's current portfolio context (cash, positions with P&L, watchlist with live prices, total portfolio value)
-2. Loads recent conversation history from the `chat_messages` table
+2. Loads a bounded recent conversation window from the `chat_messages` table, defaulting to the most recent 20 messages
 3. Constructs a prompt with a system message, portfolio context, conversation history, and the user's new message
 4. Calls the LLM via LiteLLM → Google Gemini using `gemma-4-31b-it`, requesting structured output
 5. Parses the complete structured JSON response
-6. Auto-executes any trades or watchlist changes specified in the response
-7. Stores the message and executed actions in `chat_messages`
-8. Returns the complete JSON response to the frontend
+6. Classifies the user's message intent as analysis, execution, or confirmation
+7. Executes trades and watchlist changes only when backend intent gating allows execution or mutation
+8. Stores the message and attempted action results in `chat_messages`
+9. Returns the complete JSON response to the frontend
 
 ### Structured Output Schema
 
@@ -307,8 +337,13 @@ The LLM is instructed to respond with JSON matching this schema:
 ```json
 {
   "message": "Your conversational response to the user",
+  "recommendations": [
+    {"type": "trade", "ticker": "AAPL", "side": "buy", "rationale": "Diversifies the portfolio with a profitable mega-cap position"},
+    {"type": "watchlist", "ticker": "PYPL", "rationale": "Useful payments-sector comparison for V"}
+  ],
   "trades": [
-    {"ticker": "AAPL", "side": "buy", "quantity": 10}
+    {"ticker": "AAPL", "side": "buy", "quantity": 10},
+    {"ticker": "NVDA", "side": "buy", "notional_amount": 500}
   ],
   "watchlist_changes": [
     {"ticker": "PYPL", "action": "add"}
@@ -317,25 +352,62 @@ The LLM is instructed to respond with JSON matching this schema:
 ```
 
 - `message` (required): The conversational text shown to the user
-- `trades` (optional): Array of trades to auto-execute. Each trade goes through the same validation as manual trades (sufficient cash for buys, sufficient shares for sells)
-- `watchlist_changes` (optional): Array of watchlist modifications
+- `recommendations` (optional): Array of non-mutating suggestions. Recommendations never change portfolio or watchlist state by themselves.
+- `trades` (optional): Array of trade requests to execute only after explicit user request or confirmation. Each trade must include exactly one of `quantity` or `notional_amount`. Dollar-based buy and sell requests are converted to share quantity at the current price before recording the execution. Each trade goes through the same validation as manual trades (sufficient cash for buys, sufficient shares or holding value for sells)
+- `watchlist_changes` (optional): Array of watchlist modifications to apply only after explicit user request or confirmation. Lower-friction confirmations such as "add it", "track those", or "remove TSLA" are sufficient.
 
-### Auto-Execution
+### Execution Intent
 
-Trades specified by the LLM execute automatically — no confirmation dialog. This is a deliberate design choice:
-- It's a simulated environment with fake money, so the stakes are zero
-- It creates an impressive, fluid demo experience
-- It demonstrates agentic AI capabilities — the core theme of the course
+Trades specified by the LLM execute without an additional confirmation dialog only when the user has explicitly requested execution or confirmed a prior recommendation. This is a deliberate design choice:
+- Analysis requests should produce recommendations, not trades
+- Execution requests should produce validated trades
+- Confirmation phrases like "yes, do that" can execute the prior recommendation
+- It preserves a fluid demo while keeping user intent unambiguous
+
+Backend intent gating is authoritative. The LLM may propose `recommendations`, `trades`, and `watchlist_changes`, but only the backend decides whether executable arrays are applied. If the user's message is analysis-only, executable arrays are ignored or converted into non-mutating recommendations in the response. This same rule applies in mock mode.
+
+Confirmation intent applies only to the most recent pending actionable recommendation set, and only when unambiguous. Short confirmations such as "yes", "do it", or "go ahead" can execute the latest actionable recommendation set if it was presented as one explicit plan. If the latest assistant response contains multiple independent recommendations, a generic confirmation is ambiguous and should ask the user to clarify. Specific confirmations such as "buy the NVDA one" may execute the matching recommendation. Pending recommendations expire after a new unrelated user message or after 10 minutes.
+
+Pending executable recommendation state is not persisted across container restarts. Chat messages and recommendation text remain in history, but after restart a generic confirmation such as "yes, do it" must not execute an old recommendation.
 
 If a trade fails validation (e.g., insufficient cash), the error is included in the chat response so the LLM can inform the user.
+
+Trade requests may be share-based or dollar-based. Dollar-based buys and sells are converted to fractional shares at a fresh current price before validation and execution. Executed trades are always recorded as fractional shares at the execution price, with notional amount stored as derived audit data. Short selling is not supported; sells can only reduce existing long positions and position quantity can never become negative.
+
+V1 supports `sell all` for owned tickers, mapping to the full current position quantity. V1 does not support a manual `buy max` shortcut; AI requests such as "buy as much as possible" should ask for clarification or a dollar amount unless a later decision defines buy-max semantics.
+
+Trade quantity precision is 6 decimal places. Dollar-based trade requests convert to shares using the fresh current price and round the resulting share quantity down to 6 decimal places before validation and execution. Persisted money values use integer cents; API/UI responses may expose dollar numbers for presentation. Persisted trade execution prices use decimal strings, and trade execution math uses decimal arithmetic. The price cache may use floats for streaming/display, but execution converts prices to decimals before validation and persistence. The UI may show up to 6 share decimals while trimming trailing zeros.
+
+API responses should expose exact money fields in cents and may also include display-friendly dollar fields. For example, return `cash_balance_cents` plus `cash_balance`, and `total_value_cents` plus `total_value`. Request payloads may accept dollar amounts for user-entered notionals and convert them at the backend boundary.
+
+Frontend money formatting should use cents fields as authoritative when present. Dollar fields are convenience values and should not be used for precise frontend calculations. The frontend must not calculate portfolio state from formatted strings.
+
+Dollar-based buys never overspend cash or the requested notional amount. Executed notional is derived from the rounded-down share quantity and execution price; any remainder stays as cash.
+
+Dollar-based sells never exceed the requested notional amount or the held share quantity. Executed notional is derived from the rounded-down share quantity and execution price; any unsold remainder stays in the long position.
+
+Trade requests are rejected if the requested quantity is less than or equal to zero, the rounded executable quantity is zero, or the executed notional amount is less than $0.01. The validation error should state that the trade amount is too small to execute.
+
+The AI may recommend or be asked to trade tickers outside the current watchlist. Before executing a trade for an unpriced ticker, the backend must make it a priced ticker and obtain a current price. If no price is available, the trade is rejected with a clear error. This does not add the ticker to the watchlist unless separately requested.
+
+Manual trade bar submissions and AI-requested trades must use the same backend trade execution path. That path owns ticker validation, current price lookup, share/dollar conversion, cash and holding validation, no-short-selling enforcement, position updates, trade history persistence, and portfolio snapshot creation. Executed trades record `source` as `"manual"` or `"ai"`.
+
+Successful trade executions create an immediate portfolio snapshot. Failed trade requests and watchlist changes do not create portfolio snapshots.
+
+Periodic snapshots should be written only when total portfolio value changed from the last snapshot by at least $0.01, or when no previous snapshot exists. Successful trade executions always create a snapshot even if the value change is below this threshold.
+
+Attempted AI actions are persisted with result status. Successful actions include execution or watchlist details. Failed actions include a clear error reason and do not mutate portfolio or watchlist state. Assistant messages should summarize failures in plain language.
+
+Watchlist changes follow the same intent rule with a lower-friction interpretation: short commands such as "track PYPL", "add those", or "remove TSLA" are sufficient, but analysis-only prompts should not silently mutate the watchlist.
 
 ### System Prompt Guidance
 
 The LLM should be prompted as "FinAlly, an AI trading assistant" with instructions to:
 - Analyze portfolio composition, risk concentration, and P&L
 - Suggest trades with reasoning
-- Execute trades when the user asks or agrees
-- Manage the watchlist proactively
+- Execute trades only when the user explicitly asks or agrees
+- Recommend watchlist changes proactively, but apply them only when the user explicitly asks or agrees
+- Recommend tickers outside the current watchlist when relevant
 - Be concise and data-driven in responses
 - Always respond with valid structured JSON
 
@@ -346,6 +418,8 @@ When `LLM_MOCK=true`, the backend returns deterministic mock responses instead o
 - Development without an API key
 - CI/CD pipelines
 
+Mock mode replaces only the model call. Deterministic mock responses must still pass through the normal intent checks, schema parsing, trade validation, watchlist validation, execution, and persistence pipeline.
+
 ---
 
 ## 10. Frontend Design
@@ -354,12 +428,12 @@ When `LLM_MOCK=true`, the backend returns deterministic mock responses instead o
 
 The frontend is a single-page application with a dense, terminal-inspired layout. The specific component architecture and layout system is up to the Frontend Engineer, but the UI should include these elements:
 
-- **Watchlist panel** — grid/table of watched tickers with: ticker symbol, current price (flashing green/red on change), daily change %, and a sparkline mini-chart (accumulated from SSE since page load)
+- **Watchlist panel** — grid/table of watchlist tickers with: ticker symbol, current price (flashing green/red on change), daily change %, and a sparkline mini-chart (accumulated from SSE since page load)
 - **Main chart area** — larger chart for the currently selected ticker, with at minimum price over time. Clicking a ticker in the watchlist selects it here.
 - **Portfolio heatmap** — treemap visualization where each rectangle is a position, sized by portfolio weight, colored by P&L (green = profit, red = loss)
 - **P&L chart** — line chart showing total portfolio value over time, using data from `portfolio_snapshots`
-- **Positions table** — tabular view of all positions: ticker, quantity, avg cost, current price, unrealized P&L, % change
-- **Trade bar** — simple input area: ticker field, quantity field, buy button, sell button. Market orders, instant fill.
+- **Positions table** — tabular view of active long positions: ticker, quantity, avg cost, current price, unrealized P&L, % change
+- **Trade bar** — simple input area: ticker field, shares-or-dollar amount input, buy button, sell button, and sell-all shortcut for owned tickers. Market orders, instant fill.
 - **AI chat panel** — docked/collapsible sidebar. Message input, scrolling conversation history, loading indicator while waiting for LLM response. Trade executions and watchlist changes shown inline as confirmations.
 - **Header** — portfolio total value (updating live), connection status indicator, cash balance
 
@@ -431,7 +505,7 @@ The container is designed to deploy to AWS App Runner, Render, or any container 
 
 **Backend (pytest)**:
 - Market data: simulator generates valid prices, GBM math is correct, Massive API response parsing works, both implementations conform to the abstract interface
-- Portfolio: trade execution logic, P&L calculations, edge cases (selling more than owned, buying with insufficient cash, selling at a loss)
+- Portfolio: trade request validation, trade execution logic, share-based and dollar-based order conversion, P&L calculations, edge cases (selling more than owned, buying with insufficient cash, selling at a loss)
 - LLM: structured output parsing handles all valid schemas, graceful handling of malformed responses, trade validation within chat flow
 - API routes: correct status codes, response shapes, error handling
 

@@ -1,0 +1,3 @@
+# Store Money Amounts as Integer Cents
+
+FinAlly persists money values such as cash balances, executed notionals, and portfolio snapshot totals as integer cents rather than SQLite `REAL` dollar amounts. Persisted trade execution prices use decimal strings, and trade execution math uses decimal arithmetic rather than binary floats. This avoids rounding bugs in trade validation, cash updates, notional calculations, and tests, while allowing API and UI boundaries to format or expose dollar values for presentation. The trade-off is explicit conversion between cents, decimal prices, and display dollars at application boundaries, which is preferable to ambiguous money arithmetic in persistence.
