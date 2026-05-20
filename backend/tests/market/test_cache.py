@@ -1,5 +1,7 @@
 """Tests for PriceCache."""
 
+from concurrent.futures import ThreadPoolExecutor
+
 from app.market.cache import PriceCache
 
 
@@ -43,6 +45,7 @@ class TestPriceCache:
         cache.update("AAPL", 190.00)
         cache.remove("AAPL")
         assert cache.get("AAPL") is None
+        assert cache.get_history("AAPL") == []
 
     def test_remove_nonexistent(self):
         """Test removing a ticker that doesn't exist."""
@@ -56,6 +59,62 @@ class TestPriceCache:
         cache.update("GOOGL", 175.00)
         all_prices = cache.get_all()
         assert set(all_prices.keys()) == {"AAPL", "GOOGL"}
+
+    def test_get_history(self):
+        """Test getting recent price history for a ticker."""
+        cache = PriceCache()
+        first = cache.update("AAPL", 190.00, timestamp=1.0)
+        second = cache.update("AAPL", 191.00, timestamp=2.0)
+        assert cache.get_history("AAPL") == [first, second]
+
+    def test_get_history_unknown_ticker(self):
+        """Test getting history for a ticker with no updates."""
+        cache = PriceCache()
+        assert cache.get_history("NOPE") == []
+
+    def test_history_is_bounded(self):
+        """Test that history keeps only the configured number of updates."""
+        cache = PriceCache(history_size=2)
+        cache.update("AAPL", 190.00)
+        second = cache.update("AAPL", 191.00)
+        third = cache.update("AAPL", 192.00)
+        assert cache.get_history("AAPL") == [second, third]
+
+    def test_get_all_history(self):
+        """Test getting recent price history for all tickers."""
+        cache = PriceCache()
+        aapl = cache.update("AAPL", 190.00)
+        googl = cache.update("GOOGL", 175.00)
+        assert cache.get_all_history() == {"AAPL": [aapl], "GOOGL": [googl]}
+
+    def test_invalid_history_size(self):
+        """Test rejecting a non-positive history size."""
+        try:
+            PriceCache(history_size=0)
+        except ValueError as exc:
+            assert str(exc) == "history_size must be at least 1"
+        else:
+            raise AssertionError("Expected ValueError")
+
+    def test_concurrent_updates_and_reads(self):
+        """Test that concurrent readers and writers leave cache state consistent."""
+        cache = PriceCache(history_size=10)
+        tickers = [f"TICK{i}" for i in range(10)]
+
+        def run_updates(ticker: str) -> None:
+            for price in range(100):
+                cache.update(ticker, float(price))
+                cache.get(ticker)
+                cache.get_history(ticker)
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            list(executor.map(run_updates, tickers * 4))
+
+        assert len(cache) == len(tickers)
+        assert set(cache.get_all()) == set(tickers)
+        for ticker in tickers:
+            assert cache.get_price(ticker) == 99.0
+            assert len(cache.get_history(ticker)) <= 10
 
     def test_version_increments(self):
         """Test that version counter increments."""

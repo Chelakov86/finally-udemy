@@ -27,7 +27,7 @@ MarketDataSource (ABC)
 |------|---------|
 | `models.py` | `PriceUpdate` — immutable frozen dataclass (ticker, price, previous_price, timestamp, change, direction) |
 | `interface.py` | `MarketDataSource` — abstract base class defining `start/stop/add_ticker/remove_ticker/get_tickers` |
-| `cache.py` | `PriceCache` — thread-safe price store with version counter for SSE change detection |
+| `cache.py` | `PriceCache` — thread-safe price store with bounded per-ticker history and version counter for SSE change detection |
 | `seed_prices.py` | Realistic seed prices, per-ticker GBM params (drift/volatility), correlation groups |
 | `simulator.py` | `GBMSimulator` (Geometric Brownian Motion with Cholesky-correlated moves) + `SimulatorDataSource` |
 | `massive_client.py` | `MassiveDataSource` — REST polling client for Polygon.io via the `massive` package |
@@ -38,6 +38,7 @@ MarketDataSource (ABC)
 
 - **Strategy pattern** — both data sources implement the same ABC; downstream code is source-agnostic
 - **PriceCache as single point of truth** — producers write, consumers read; no direct coupling
+- **Bounded startup history** — the cache stores the latest 30 updates per ticker so downstream watchlist/portfolio APIs can seed sparklines immediately on page load
 - **GBM with correlated moves** — Cholesky decomposition of sector-based correlation matrix; tech stocks correlate at 0.6, finance at 0.5, cross-sector at 0.3
 - **Random shock events** — ~0.1% chance per tick per ticker of a 2-5% move for visual drama
 - **SSE over WebSockets** — simpler, one-way push, universal browser support
@@ -91,9 +92,11 @@ source = create_market_data_source(cache)  # Reads MASSIVE_API_KEY
 await source.start(["AAPL", "GOOGL", "MSFT", ...])
 
 # Read prices
-update = cache.get("AAPL")          # PriceUpdate or None
-price = cache.get_price("AAPL")     # float or None
-all_prices = cache.get_all()        # dict[str, PriceUpdate]
+update = cache.get("AAPL")              # PriceUpdate or None
+price = cache.get_price("AAPL")         # float or None
+history = cache.get_history("AAPL")     # list[PriceUpdate], oldest first
+all_prices = cache.get_all()            # dict[str, PriceUpdate]
+all_history = cache.get_all_history()   # dict[str, list[PriceUpdate]]
 
 # Dynamic watchlist
 await source.add_ticker("TSLA")

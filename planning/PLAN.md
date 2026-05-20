@@ -112,7 +112,7 @@ finally/
 
 - **`frontend/`** is a self-contained Next.js project. It knows nothing about Python. It talks to the backend via `/api/*` endpoints and `/api/stream/*` SSE endpoints. Internal structure is up to the Frontend Engineer agent.
 - **`backend/`** is a self-contained uv project with its own `pyproject.toml`. It owns all server logic including database initialization, schema, seed data, API routes, SSE streaming, market data, and LLM integration. Internal structure is up to the Backend/Market Data agents.
-- **`backend/db/`** contains schema SQL definitions and seed logic. The backend lazily initializes the database on first request — creating tables and seeding default data if the SQLite file doesn't exist or is empty.
+- **`backend/db/`** contains schema SQL definitions and seed logic. The backend initializes the database during FastAPI lifespan startup - creating tables and seeding default data if the SQLite file doesn't exist or is empty.
 - **`db/`** at the top level is the runtime volume mount point. The SQLite file (`db/finally.db`) is created here by the backend and persists across container restarts via Docker volume.
 - **`planning/`** contains project-wide documentation, including this plan. All agents reference files here as the shared contract.
 - **`test/`** contains Playwright E2E tests and supporting infrastructure (e.g., `docker-compose.test.yml`). Unit tests live within `frontend/` and `backend/` respectively, following each framework's conventions.
@@ -132,6 +132,13 @@ MASSIVE_API_KEY=
 
 # Optional: Set to "true" for deterministic mock LLM responses (testing)
 LLM_MOCK=false
+
+# Optional: LiteLLM model identifier. Default is gemma-4-31b-it.
+LLM_MODEL=gemma-4-31b-it
+
+# Optional but required before exposing the app on a public URL.
+# When set, the backend gates the UI and API behind a simple password check.
+APP_PASSWORD=
 ```
 
 ### Behavior
@@ -139,6 +146,8 @@ LLM_MOCK=false
 - If `MASSIVE_API_KEY` is set and non-empty → backend uses Massive REST API for market data
 - If `MASSIVE_API_KEY` is absent or empty → backend uses the built-in market simulator
 - If `LLM_MOCK=true` → backend returns deterministic mock LLM responses (for E2E tests)
+- If `LLM_MODEL` is set and non-empty → backend uses that LiteLLM model identifier; otherwise it defaults to `gemma-4-31b-it`
+- If `APP_PASSWORD` is set and non-empty → backend requires the configured password before serving the UI or API. Do not deploy the app to a public URL without this or an equivalent auth proxy.
 - The backend reads `.env` from the project root (mounted into the container or read via docker `--env-file`)
 
 ---
@@ -182,6 +191,7 @@ Both the simulator and the Massive client implement the same abstract interface.
 
 - A single background task (simulator or Massive poller) writes to an in-memory price cache
 - The cache holds the latest price, previous price, and timestamp for each ticker
+- The cache also holds a sliding in-memory history of the most recent 30 price updates per ticker so frontend sparklines can render immediately after page load
 - SSE streams read from this cache and push updates to connected clients
 - This architecture supports future multi-user scenarios without changes to the data layer
 - Active market data coverage is the union of watchlist tickers and tickers with active positions, so portfolio valuation continues even if a user removes an owned ticker from the watchlist
@@ -200,13 +210,17 @@ Both the simulator and the Massive client implement the same abstract interface.
 
 ## 7. Database
 
-### SQLite with Lazy Initialization
+### SQLite Initialization
 
-The backend checks for the SQLite database on startup (or first request). If the file doesn't exist or tables are missing, it creates the schema and seeds default data. This means:
+The backend verifies and initializes the SQLite database during the FastAPI `lifespan` startup handler before accepting HTTP traffic. If the file doesn't exist or tables are missing, it creates the schema and seeds default data. This means:
 
 - No separate migration step
 - No manual database setup
 - Fresh Docker volumes start with a clean, seeded database automatically
+- Startup initialization avoids concurrent first-request schema creation races
+- Schema creation and seed inserts are idempotent
+- Every SQLite connection must execute `PRAGMA foreign_keys = ON;`
+- If the app is ever run with multiple Uvicorn worker processes, migrations must use a process-safe lock because each worker runs its own startup lifecycle
 
 ### Schema
 
@@ -229,13 +243,13 @@ All tables include a `user_id` column defaulting to `"default"`. This is hardcod
 - `user_id` TEXT (default: `"default"`)
 - `ticker` TEXT
 - `quantity` REAL (fractional shares supported)
-- `avg_cost` REAL
+- `avg_cost` TEXT (decimal string)
 - `updated_at` TEXT (ISO timestamp)
 - UNIQUE constraint on `(user_id, ticker)`
 
 Positions are long-only. Quantity can never be negative; sell requests that exceed the held quantity are rejected. When a sell reduces a position to exactly zero, the position row is deleted; the trade execution remains in the append-only `trades` table.
 
-Average cost uses weighted-average purchase price per share. Buying more of an existing position recalculates average cost; partial sells reduce quantity but leave average cost unchanged.
+Average cost uses weighted-average purchase price per share. Buying more of an existing position recalculates average cost with Python `Decimal` arithmetic and persists the result as a decimal string; partial sells reduce quantity but leave average cost unchanged.
 
 V1 tracks unrealized P&L for active positions and total portfolio value over time. Realized P&L reporting is out of scope.
 
@@ -281,25 +295,27 @@ Chat history persists in SQLite across container restarts. The UI may display pe
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/stream/prices` | SSE stream of live price updates |
+| GET | `/api/market/history` | Recent in-memory price history for tracked tickers, defaulting to the latest 30 ticks per ticker |
 
 ### Portfolio
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/portfolio` | Current positions, cash balance, total value, unrealized P&L |
-| POST | `/api/portfolio/trade` | Execute a trade request: `{ticker, side, quantity}` or `{ticker, side, notional_amount}` |
-| GET | `/api/portfolio/history` | Portfolio value snapshots over time (for P&L chart) |
+| POST | `/api/portfolio/trade` | Execute a trade request: `{ticker, side, quantity}` or `{ticker, side, notional_amount}`. Returns the executed `Trade` record and the updated `Position` record, or a validation error without mutation |
+| GET | `/api/portfolio/history` | Portfolio value snapshots over time (for P&L chart). Supports `range=1D|1W|1M|ALL` and returns at most 200 downsampled points by default |
 
 ### Watchlist
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/watchlist` | Current watchlist tickers with latest prices |
-| POST | `/api/watchlist` | Add a ticker: `{ticker}` |
-| DELETE | `/api/watchlist/{ticker}` | Remove a ticker |
+| POST | `/api/watchlist` | Add a ticker: `{ticker}`. Returns the updated watchlist with cached prices and recent price history |
+| DELETE | `/api/watchlist/{ticker}` | Remove a ticker. Returns the updated watchlist with cached prices and recent price history |
 
 ### Chat
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/chat` | Send a message, receive complete JSON response (message + executed actions) |
+| DELETE | `/api/chat` | Clear persisted chat history for the default user |
 
 ### System
 | Method | Path | Description |
@@ -314,7 +330,7 @@ When writing code to make calls to LLMs, use LiteLLM with Google Gemini via the 
 
 There is a `GEMINI_API_KEY` in the `.env` file in the project root.
 
-Use `gemma-4-31b-it` as the LLM model.
+Use `gemma-4-31b-it` as the default LLM model. The actual LiteLLM model identifier must be read from `LLM_MODEL` so deployments can adjust provider routing or model availability without code changes.
 
 ### How It Works
 
@@ -323,8 +339,8 @@ When the user sends a chat message, the backend:
 1. Loads the user's current portfolio context (cash, positions with P&L, watchlist with live prices, total portfolio value)
 2. Loads a bounded recent conversation window from the `chat_messages` table, defaulting to the most recent 20 messages
 3. Constructs a prompt with a system message, portfolio context, conversation history, and the user's new message
-4. Calls the LLM via LiteLLM → Google Gemini using `gemma-4-31b-it`, requesting structured output
-5. Parses the complete structured JSON response
+4. Calls the LLM via LiteLLM → Google Gemini using the configured `LLM_MODEL`, requesting structured output with the strongest mechanism supported by the configured model
+5. Parses and validates the complete structured JSON response with Pydantic
 6. Classifies the user's message intent as analysis, execution, or confirmation
 7. Executes trades and watchlist changes only when backend intent gating allows execution or mutation
 8. Stores the message and attempted action results in `chat_messages`
@@ -356,6 +372,8 @@ The LLM is instructed to respond with JSON matching this schema:
 - `trades` (optional): Array of trade requests to execute only after explicit user request or confirmation. Each trade must include exactly one of `quantity` or `notional_amount`. Dollar-based buy and sell requests are converted to share quantity at the current price before recording the execution. Each trade goes through the same validation as manual trades (sufficient cash for buys, sufficient shares or holding value for sells)
 - `watchlist_changes` (optional): Array of watchlist modifications to apply only after explicit user request or confirmation. Lower-friction confirmations such as "add it", "track those", or "remove TSLA" are sufficient.
 
+The backend must gracefully handle malformed JSON, schema validation failures, and provider-side structured-output errors. Invalid model output should produce a user-facing assistant error response and must not execute trades or mutate the watchlist.
+
 ### Execution Intent
 
 Trades specified by the LLM execute without an additional confirmation dialog only when the user has explicitly requested execution or confirmed a prior recommendation. This is a deliberate design choice:
@@ -369,6 +387,19 @@ Backend intent gating is authoritative. The LLM may propose `recommendations`, `
 Confirmation intent applies only to the most recent pending actionable recommendation set, and only when unambiguous. Short confirmations such as "yes", "do it", or "go ahead" can execute the latest actionable recommendation set if it was presented as one explicit plan. If the latest assistant response contains multiple independent recommendations, a generic confirmation is ambiguous and should ask the user to clarify. Specific confirmations such as "buy the NVDA one" may execute the matching recommendation. Pending recommendations expire after a new unrelated user message or after 10 minutes.
 
 Pending executable recommendation state is not persisted across container restarts. Chat messages and recommendation text remain in history, but after restart a generic confirmation such as "yes, do it" must not execute an old recommendation.
+
+Pending executable recommendations are stored in a thread-safe in-memory `PendingActionsCache` with a periodic expiration loop. The cache stores explicit typed state:
+
+```python
+class PendingActionSet(BaseModel):
+    user_id: str
+    trades: list[TradeRequest]
+    watchlist_changes: list[WatchlistChangeRequest]
+    timestamp: datetime
+    message_id: str
+```
+
+Entries expire after 10 minutes and are cleared when a new unrelated user message makes the prior recommendation stale.
 
 If a trade fails validation (e.g., insufficient cash), the error is included in the chat response so the LLM can inform the user.
 
@@ -428,7 +459,7 @@ Mock mode replaces only the model call. Deterministic mock responses must still 
 
 The frontend is a single-page application with a dense, terminal-inspired layout. The specific component architecture and layout system is up to the Frontend Engineer, but the UI should include these elements:
 
-- **Watchlist panel** — grid/table of watchlist tickers with: ticker symbol, current price (flashing green/red on change), daily change %, and a sparkline mini-chart (accumulated from SSE since page load)
+- **Watchlist panel** — grid/table of watchlist tickers with: ticker symbol, current price (flashing green/red on change), daily change %, and a sparkline mini-chart seeded from cached price history and then updated from SSE
 - **Main chart area** — larger chart for the currently selected ticker, with at minimum price over time. Clicking a ticker in the watchlist selects it here.
 - **Portfolio heatmap** — treemap visualization where each rectangle is a position, sized by portfolio weight, colored by P&L (green = profit, red = loss)
 - **P&L chart** — line chart showing total portfolio value over time, using data from `portfolio_snapshots`
@@ -441,6 +472,7 @@ The frontend is a single-page application with a dense, terminal-inspired layout
 
 - Use `EventSource` for SSE connection to `/api/stream/prices`
 - Canvas-based charting library preferred (Lightweight Charts or Recharts) for performance
+- Heatmaps and treemaps must render within explicit container bounds. Prefer canvas-based rendering or a dedicated React treemap component with fixed width/height containment to avoid resize distortion in the dense terminal layout.
 - Price flash effect: on receiving a new price, briefly apply a CSS class with background color transition, then remove it
 - All API calls go to the same origin (`/api/*`) — no CORS configuration needed
 - Tailwind CSS for styling with a custom dark theme
@@ -466,6 +498,11 @@ Stage 2: Python 3.12 slim
 ```
 
 FastAPI serves the static frontend files and all API routes on port 8000.
+
+FastAPI must register API and static asset routes before a final catch-all route. The catch-all serves the exported `index.html` for non-API, non-asset paths so client-side routing survives browser refreshes on subroutes.
+
+> [!WARNING]
+> **CRITICAL SECURITY RISK:** V1 has no signup and assumes one implicit user. Never deploy the Docker container directly to a public cloud URL unless access is protected by `APP_PASSWORD` or an external authentication proxy such as Nginx Basic Auth or Cloudflare Access. Without authentication, anyone with the URL can view portfolio/chat history, execute paper trades, and consume Gemini API quota.
 
 ### Docker Volume
 
@@ -497,6 +534,8 @@ All scripts should be idempotent — safe to run multiple times.
 
 The container is designed to deploy to AWS App Runner, Render, or any container platform. A Terraform configuration for App Runner may be provided in a `deploy/` directory as a stretch goal, but is not part of the core build.
 
+Public cloud deployment is only acceptable when protected by `APP_PASSWORD` or an external authentication proxy. The default local-first configuration must not be exposed directly to the internet.
+
 ---
 
 ## 12. Testing Strategy
@@ -518,7 +557,9 @@ The container is designed to deploy to AWS App Runner, Render, or any container 
 
 ### E2E Tests (in `test/`)
 
-**Infrastructure**: A separate `docker-compose.test.yml` in `test/` that spins up the app container plus a Playwright container. This keeps browser dependencies out of the production image.
+**Infrastructure**: Support two E2E modes:
+- Local host mode: run Playwright on the developer machine against an already running app server. This is the default for active development because it is faster and avoids browser-driver friction.
+- Containerized CI mode: a separate `docker-compose.test.yml` in `test/` spins up the app container plus a Playwright container. This keeps browser dependencies out of the production image and provides isolated CI runs.
 
 **Environment**: Tests run with `LLM_MOCK=true` by default for speed and determinism.
 

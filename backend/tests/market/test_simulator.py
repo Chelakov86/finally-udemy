@@ -1,5 +1,7 @@
 """Tests for GBMSimulator."""
 
+import numpy as np
+
 from app.market.seed_prices import SEED_PRICES
 from app.market.simulator import GBMSimulator
 
@@ -83,6 +85,19 @@ class TestGBMSimulator:
         assert sim._cholesky is None  # Only 1 ticker, no correlation matrix
         sim.add_ticker("GOOGL")
         assert sim._cholesky is not None  # Now 2 tickers, matrix exists
+
+    def test_cholesky_failure_falls_back_to_independent_moves(self, monkeypatch):
+        """Test that simulator still runs if correlation matrix decomposition fails."""
+
+        def raise_linalg_error(_corr):
+            raise np.linalg.LinAlgError("not positive-definite")
+
+        monkeypatch.setattr("numpy.linalg.cholesky", raise_linalg_error)
+        sim = GBMSimulator(tickers=["AAPL", "GOOGL"])
+
+        assert sim._cholesky is None
+        result = sim.step()
+        assert set(result.keys()) == {"AAPL", "GOOGL"}
 
     def test_cholesky_none_with_one_ticker(self):
         """Test that Cholesky is None with only one ticker."""

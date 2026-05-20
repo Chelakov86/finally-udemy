@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import time
+from collections import deque
 from threading import Lock
+from typing import Final
 
 from .models import PriceUpdate
+
+DEFAULT_HISTORY_SIZE: Final = 30
 
 
 class PriceCache:
@@ -15,8 +19,12 @@ class PriceCache:
     Readers: SSE streaming endpoint, portfolio valuation, trade execution.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, history_size: int = DEFAULT_HISTORY_SIZE) -> None:
+        if history_size < 1:
+            raise ValueError("history_size must be at least 1")
         self._prices: dict[str, PriceUpdate] = {}
+        self._history: dict[str, deque[PriceUpdate]] = {}
+        self._history_size = history_size
         self._lock = Lock()
         self._version: int = 0  # Monotonically increasing; bumped on every update
 
@@ -38,6 +46,7 @@ class PriceCache:
                 timestamp=ts,
             )
             self._prices[ticker] = update
+            self._history.setdefault(ticker, deque(maxlen=self._history_size)).append(update)
             self._version += 1
             return update
 
@@ -51,15 +60,26 @@ class PriceCache:
         with self._lock:
             return dict(self._prices)
 
+    def get_history(self, ticker: str) -> list[PriceUpdate]:
+        """Get recent price updates for a ticker, oldest first."""
+        with self._lock:
+            return list(self._history.get(ticker, ()))
+
+    def get_all_history(self) -> dict[str, list[PriceUpdate]]:
+        """Snapshot of recent price history for all tracked tickers."""
+        with self._lock:
+            return {ticker: list(history) for ticker, history in self._history.items()}
+
     def get_price(self, ticker: str) -> float | None:
         """Convenience: get just the price float, or None."""
         update = self.get(ticker)
         return update.price if update else None
 
     def remove(self, ticker: str) -> None:
-        """Remove a ticker from the cache (e.g., when removed from watchlist)."""
+        """Remove a ticker and its history from the cache."""
         with self._lock:
             self._prices.pop(ticker, None)
+            self._history.pop(ticker, None)
 
     @property
     def version(self) -> int:
