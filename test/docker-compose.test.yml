@@ -1,0 +1,32 @@
+services:
+  finally-test-app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: finally-test-app
+    ports:
+      - "8000:8000"
+    environment:
+      - LLM_MOCK=true
+      - MASSIVE_API_KEY=
+      - GEMINI_API_KEY=mock-key
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/watchlist')"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+
+  playwright-runner:
+    image: mcr.microsoft.com/playwright:v1.45.0-jammy
+    container_name: playwright-runner
+    working_dir: /app/test
+    volumes:
+      - ..:/app
+    environment:
+      - BASE_URL=http://finally-test-app:8000
+      - PLAYWRIGHT_TEST_BASE_URL=http://finally-test-app:8000
+      - CI=true
+    depends_on:
+      finally-test-app:
+        condition: service_healthy
+    command: sh -c "npm ci && npx playwright test"
