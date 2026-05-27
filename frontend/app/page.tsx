@@ -361,9 +361,13 @@ export default function WorkstationDashboard() {
       setChatMessages((prev) => [...prev, assistantMsg]);
 
       // If the AI agent automatically modified or executed transactions, reload states!
+      const hasExecutedWL = res.actions?.watchlist_changes && res.actions.watchlist_changes.length > 0;
+      const hasExecutedTrades = res.actions?.trades && res.actions.trades.length > 0;
       if (
         (res.trades && res.trades.length > 0) ||
-        (res.watchlist_changes && res.watchlist_changes.length > 0)
+        (res.watchlist_changes && res.watchlist_changes.length > 0) ||
+        hasExecutedWL ||
+        hasExecutedTrades
       ) {
         await fetchPortfolio();
         await fetchWatchlist();

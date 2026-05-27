@@ -566,7 +566,8 @@ Response JSON Schema:
         return {
             "message": ai_response.message,
             "recommendations": [r.model_dump() for r in all_recommendations],
-            "trades": [],
-            "watchlist_changes": [],
+            "trades": [t.model_dump() for t in ai_response.trades],
+            "watchlist_changes": [w.model_dump() for w in ai_response.watchlist_changes],
             "actions": None,
         }
+

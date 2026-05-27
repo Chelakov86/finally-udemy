@@ -272,6 +272,19 @@ def test_chat_confirmation_intent(client):
         assert trades[0]["quantity"] == 10.0
 
 
+def test_chat_analysis_returns_proposed_actions(client):
+    """Chat message in analysis mode returns the proposed trades and watchlist changes to client."""
+    response = client.post("/api/chat", json={"message": "analyze AAPL"})
+    assert response.status_code == 200
+    data = response.json()
+
+    assert len(data["trades"]) == 1
+    assert data["trades"][0]["ticker"] == "AAPL"
+    assert data["trades"][0]["side"] == "buy"
+    assert data["trades"][0]["quantity"] == 10.0
+    assert data["actions"] is None
+
+
 def test_chat_execution_intent(client):
     """Chat message with direct instruction immediately executes the trade or watchlist update."""
     response = client.post("/api/chat", json={"message": "buy 10 shares of AAPL"})
