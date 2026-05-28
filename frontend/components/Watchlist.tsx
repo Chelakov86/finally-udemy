@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
-import { formatPercent, formatQuantity } from "@/utils/formatter";
-import { Plus, Trash2, ArrowUpRight, ArrowDownRight, Minus, TrendingUp } from "lucide-react";
+import { formatPercent } from "@/utils/formatter";
+import { Plus, Trash2, ArrowUpRight, ArrowDownRight, TrendingUp } from "lucide-react";
 
 export interface WatchlistItem {
   ticker: string;
@@ -97,7 +97,7 @@ export default function Watchlist({
   return (
     <div className="flex flex-col h-full bg-[#161b22] border border-border-custom rounded-lg overflow-hidden select-none">
       {/* Panel Header */}
-      <div className="flex h-11 items-center justify-between border-b border-border-custom bg-[#0d1117]/80 px-4">
+      <div className="flex min-h-11 flex-wrap items-center justify-between gap-2 border-b border-border-custom bg-[#0d1117]/80 px-3 py-2 sm:flex-nowrap sm:px-4">
         <div className="flex items-center space-x-2">
           <TrendingUp className="w-4 h-4 text-blue-primary" />
           <h2 className="text-xs font-bold tracking-wider text-gray-300 uppercase">
@@ -126,15 +126,15 @@ export default function Watchlist({
       </div>
 
       {/* Watchlist Body (Scrollable Table) */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="border-b border-border-custom bg-[#0d1117]/40 text-[9px] font-bold tracking-widest text-gray-500 uppercase">
               <th className="py-2 pl-4">SYMBOL</th>
-              <th className="py-2 text-right">LAST PRICE</th>
-              <th className="py-2 text-right">CHANGE</th>
-              <th className="py-2 text-center">SPARKLINE</th>
-              <th className="py-2 pr-4 text-right">ACTIONS</th>
+              <th className="py-2 text-right">LAST</th>
+              <th className="py-2 text-right">CHG</th>
+              <th className="py-2 text-center">TREND</th>
+              <th className="py-2 pr-3 text-right"> </th>
             </tr>
           </thead>
           <tbody>
@@ -201,7 +201,7 @@ export default function Watchlist({
                     </td>
 
                     {/* Remove Action */}
-                    <td className="py-2.5 pr-4 text-right">
+                    <td className="py-2.5 pr-3 text-right">
                       <button
                         id={`watchlist-delete-${item.ticker}`}
                         onClick={async (e) => {

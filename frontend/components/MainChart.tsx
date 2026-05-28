@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef } from "react";
-import { createChart, ColorType, ISeriesApi, UTCTimestamp, AreaSeries } from "lightweight-charts";
+import { createChart, ColorType, IChartApi, ISeriesApi, UTCTimestamp, AreaSeries } from "lightweight-charts";
 import { AreaChart } from "lucide-react";
 
 interface ChartTick {
@@ -16,7 +16,7 @@ interface MainChartProps {
 
 export default function MainChart({ ticker, ticks }: MainChartProps) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<any>(null);
+  const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Area"> | null>(null);
 
   useEffect(() => {
@@ -117,14 +117,14 @@ export default function MainChart({ ticker, ticks }: MainChartProps) {
   return (
     <div className="flex flex-col h-full bg-[#161b22] border border-border-custom rounded-lg overflow-hidden relative">
       {/* Chart Panel Header */}
-      <div className="flex h-11 items-center justify-between border-b border-border-custom bg-[#0d1117]/80 px-4 shrink-0">
-        <div className="flex items-center space-x-2">
+      <div className="flex min-h-11 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border-custom bg-[#0d1117]/80 px-3 py-2 sm:flex-nowrap sm:px-4">
+        <div className="flex min-w-0 items-center space-x-2">
           <AreaChart className="w-4 h-4 text-blue-primary" />
-          <h2 className="text-xs font-bold tracking-wider text-gray-300 uppercase">
+          <h2 className="truncate text-xs font-bold tracking-wider text-gray-300 uppercase">
             ACTIVE CHART: <span className="text-accent-yellow font-mono text-sm">{ticker}</span>
           </h2>
         </div>
-        <span className="font-mono text-[9px] text-gray-500 tracking-wider">
+        <span className="hidden font-mono text-[9px] text-gray-500 tracking-wider 2xl:inline">
           LIVE GBM SIMULATOR OR MASSIVE AGGREGATES
         </span>
       </div>

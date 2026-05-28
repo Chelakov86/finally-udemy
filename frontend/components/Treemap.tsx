@@ -146,14 +146,14 @@ export default function Treemap({ positions }: TreemapProps) {
       className="flex flex-col h-full bg-[#161b22] border border-border-custom rounded-lg overflow-hidden select-none"
     >
       {/* Panel Header */}
-      <div className="flex h-11 items-center justify-between border-b border-border-custom bg-[#0d1117]/80 px-4 shrink-0">
-        <div className="flex items-center space-x-2">
+      <div className="flex min-h-11 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border-custom bg-[#0d1117]/80 px-3 py-2 sm:flex-nowrap sm:px-4">
+        <div className="flex min-w-0 items-center space-x-2">
           <Layers className="w-4 h-4 text-blue-primary" />
-          <h2 className="text-xs font-bold tracking-wider text-gray-300 uppercase">
-            PORTFOLIO HEATMAP (BY POSITION SIZE)
+          <h2 className="truncate text-xs font-bold tracking-wider text-gray-300 uppercase">
+            HEATMAP
           </h2>
         </div>
-        <span className="font-mono text-[9px] text-gray-500 tracking-wider">
+        <span className="hidden font-mono text-[9px] text-gray-500 tracking-wider 2xl:inline">
           UNREALIZED P&L COLOR SCALE
         </span>
       </div>
@@ -177,18 +177,15 @@ export default function Treemap({ positions }: TreemapProps) {
 
               // Generate color based on profit/loss opacity
               let fill = "#21262d"; // default gray
-              let border = "#30363d";
 
               if (pnl > 0) {
                 // Profit: Green glow scale
                 const opacity = Math.min(0.9, 0.2 + pnl / 10); // Fully opaque at +7%
                 fill = `rgba(46, 160, 67, ${opacity})`;
-                border = `rgba(46, 160, 67, ${opacity + 0.15})`;
               } else if (pnl < 0) {
                 // Loss: Red glow scale
                 const opacity = Math.min(0.9, 0.2 + Math.abs(pnl) / 10); // Fully opaque at -7%
                 fill = `rgba(248, 81, 73, ${opacity})`;
-                border = `rgba(248, 81, 73, ${opacity + 0.15})`;
               }
 
               // Hide details if block is tiny to prevent text crowding

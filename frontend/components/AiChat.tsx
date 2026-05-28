@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useRef, useEffect } from "react";
-import { MessageSquare, Send, Trash2, Bot, User, CheckCircle2, TrendingUp, HelpCircle } from "lucide-react";
+import { Send, Trash2, Bot, User, CheckCircle2, TrendingUp } from "lucide-react";
 
 export interface ChatMessage {
   id: string;
@@ -67,10 +67,10 @@ export default function AiChat({
   return (
     <div className="flex flex-col h-full bg-[#161b22] border border-border-custom rounded-lg overflow-hidden select-none">
       {/* Panel Header */}
-      <div className="flex h-11 items-center justify-between border-b border-border-custom bg-[#0d1117]/80 px-4 shrink-0">
-        <div className="flex items-center space-x-2">
+      <div className="flex min-h-11 shrink-0 items-center justify-between gap-2 border-b border-border-custom bg-[#0d1117]/80 px-3 py-2 sm:px-4">
+        <div className="flex min-w-0 items-center space-x-2">
           <Bot className="w-4 h-4 text-blue-primary" />
-          <h2 className="text-xs font-bold tracking-wider text-gray-300 uppercase">
+          <h2 className="truncate text-xs font-bold tracking-wider text-gray-300 uppercase">
             AI FINANCIAL ALLY
           </h2>
         </div>
@@ -239,7 +239,7 @@ export default function AiChat({
       {/* Input Message Form */}
       <form
         onSubmit={handleFormSubmit}
-        className="h-14 border-t border-border-custom bg-[#0d1117]/80 px-4 flex items-center space-x-2 shrink-0"
+        className="min-h-14 border-t border-border-custom bg-[#0d1117]/80 px-3 py-3 sm:px-4 flex items-center space-x-2 shrink-0"
       >
         <input
           id="chat-input-field"

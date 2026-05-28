@@ -2,7 +2,7 @@
 
 import React from "react";
 import { formatCents, formatPercent, formatQuantity } from "@/utils/formatter";
-import { Briefcase, ArrowUpRight, ArrowDownRight } from "lucide-react";
+import { Briefcase } from "lucide-react";
 
 export interface PositionRow {
   ticker: string;
@@ -38,21 +38,21 @@ export default function PositionsTable({ positions, onSelectTicker, activeTicker
   return (
     <div className="flex flex-col h-full bg-[#161b22] border border-border-custom rounded-lg overflow-hidden select-none">
       {/* Panel Header */}
-      <div className="flex h-11 items-center justify-between border-b border-border-custom bg-[#0d1117]/80 px-4 shrink-0">
-        <div className="flex items-center space-x-2">
+      <div className="flex min-h-11 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border-custom bg-[#0d1117]/80 px-3 py-2 sm:flex-nowrap sm:px-4">
+        <div className="flex min-w-0 items-center space-x-2">
           <Briefcase className="w-4 h-4 text-blue-primary" />
-          <h2 className="text-xs font-bold tracking-wider text-gray-300 uppercase">
-            ACTIVE LONG HOLDINGS
+          <h2 className="truncate text-xs font-bold tracking-wider text-gray-300 uppercase">
+            HOLDINGS
           </h2>
         </div>
-        <span className="font-mono text-[9px] text-gray-500 tracking-wider">
+        <span className="hidden font-mono text-[9px] text-gray-500 tracking-wider 2xl:inline">
           CENTS-BASED AUTHORITATIVE CALCULATIONS
         </span>
       </div>
 
       {/* Positions Table Body */}
-      <div className="flex-1 overflow-y-auto">
-        <table className="w-full text-left border-collapse">
+      <div className="flex-1 overflow-auto">
+        <table className="w-full min-w-[760px] text-left border-collapse">
           <thead>
             <tr className="border-b border-border-custom bg-[#0d1117]/40 text-[9px] font-bold tracking-widest text-gray-500 uppercase">
               <th className="py-2 pl-4">SYMBOL</th>
@@ -135,9 +135,9 @@ export default function PositionsTable({ positions, onSelectTicker, activeTicker
 
       {/* Aggregate Valuation Footer (Always visible) */}
       {activePositions.length > 0 && (
-        <div className="h-10 border-t border-border-custom bg-[#0d1117]/70 flex items-center justify-between px-6 text-xs select-none shrink-0 font-semibold">
+        <div className="min-h-10 border-t border-border-custom bg-[#0d1117]/70 flex flex-col gap-2 px-4 py-2 text-xs select-none shrink-0 font-semibold sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <span className="text-gray-400 tracking-wider">TOTAL PORTFOLIO HOLDINGS</span>
-          <div className="flex items-center space-x-6">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
             <div className="flex items-center space-x-1.5">
               <span className="text-[10px] text-gray-400 font-medium">TOTAL VALUE:</span>
               <span className="font-mono text-white text-sm font-bold">{formatCents(totalValueCents)}</span>

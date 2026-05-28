@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useCallback, useEffect, useState, useMemo } from "react";
 import Header from "@/components/Header";
 import Watchlist, { WatchlistItem } from "@/components/Watchlist";
 import MainChart from "@/components/MainChart";
@@ -14,8 +14,37 @@ const API_BASE = typeof window !== "undefined"
   ? (window.location.port === "3000" ? "http://localhost:8000" : "")
   : "";
 
+interface MarketHistoryTick {
+  timestamp: number;
+  price: number;
+}
+
+interface PriceUpdate {
+  price: number;
+  previous_price: number;
+  change: number;
+  change_percent: number;
+  direction: "up" | "down" | "flat";
+  timestamp: number;
+}
+
+interface ChatResponse {
+  message: string;
+  trades?: ChatMessage["trades"];
+  watchlist_changes?: ChatMessage["watchlist_changes"];
+  recommendations?: ChatMessage["recommendations"];
+  actions?: {
+    trades?: ChatMessage["trades"];
+    watchlist_changes?: ChatMessage["watchlist_changes"];
+  };
+}
+
+function getErrorMessage(err: unknown, fallback: string) {
+  return err instanceof Error ? err.message : fallback;
+}
+
 // Robust fetch utility that handles APP_PASSWORD auth gates transparently
-async function apiRequest(path: string, options: RequestInit = {}): Promise<any> {
+async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE}${path}`;
   const headers = new Headers(options.headers || {});
   
@@ -37,7 +66,7 @@ async function apiRequest(path: string, options: RequestInit = {}): Promise<any>
         headers.set("X-App-Password", newPass);
         headers.set("Authorization", `Bearer ${newPass}`);
         const retryRes = await fetch(url, { ...options, headers });
-        if (retryRes.ok) return retryRes.json();
+        if (retryRes.ok) return retryRes.json() as Promise<T>;
       }
     }
     throw new Error("Unauthorized: Invalid APP_PASSWORD.");
@@ -48,7 +77,7 @@ async function apiRequest(path: string, options: RequestInit = {}): Promise<any>
     throw new Error(errorData.detail || "API request failed.");
   }
 
-  return res.json();
+  return res.json() as Promise<T>;
 }
 
 export default function WorkstationDashboard() {
@@ -71,7 +100,7 @@ export default function WorkstationDashboard() {
   const [isThinking, setIsThinking] = useState(false);
 
   // --- DERIVED PORTFOLIO METRICS ---
-  const { totalValueCents, totalUnrealizedPnLCents } = useMemo(() => {
+  const { totalValueCents } = useMemo(() => {
     // Sum cash + positions values
     const cash = cashBalance;
     const activePositions = positions.filter((p) => p.quantity > 0);
@@ -86,36 +115,32 @@ export default function WorkstationDashboard() {
   }, [positions, cashBalance]);
 
   // --- INITIAL DATA LOAD ---
-  const fetchWatchlist = async () => {
+  const fetchWatchlist = useCallback(async () => {
     try {
-      const data = await apiRequest("/api/watchlist");
+      const data = await apiRequest<WatchlistItem[]>("/api/watchlist");
       setWatchlist(data);
-      // Fallback selection to first ticker if AAPL is not available
-      if (data.length > 0 && !activeTicker) {
-        setActiveTicker(data[0].ticker);
-      }
     } catch (err) {
       console.error("Error loading watchlist:", err);
     }
-  };
+  }, []);
 
-  const fetchPortfolio = async () => {
+  const fetchPortfolio = useCallback(async () => {
     try {
-      const data = await apiRequest("/api/portfolio");
+      const data = await apiRequest<{ positions?: PositionRow[]; cash_balance_cents?: number }>("/api/portfolio");
       setPositions(data.positions || []);
       setCashBalance(data.cash_balance_cents || 1000000);
     } catch (err) {
       console.error("Error loading portfolio:", err);
     }
-  };
+  }, []);
 
-  const fetchHistory = async () => {
+  const fetchHistory = useCallback(async () => {
     try {
-      const data = await apiRequest("/api/market/history");
+      const data = await apiRequest<Record<string, MarketHistoryTick[]>>("/api/market/history");
       const formattedHistory: Record<string, Array<{ timestamp: number; price: number }>> = {};
       
-      Object.entries(data).forEach(([ticker, list]: [string, any]) => {
-        formattedHistory[ticker] = list.map((tick: any) => ({
+      Object.entries(data).forEach(([ticker, list]) => {
+        formattedHistory[ticker] = list.map((tick) => ({
           timestamp: Math.floor(tick.timestamp),
           price: tick.price,
         }));
@@ -125,7 +150,7 @@ export default function WorkstationDashboard() {
     } catch (err) {
       console.error("Error loading historical prices:", err);
     }
-  };
+  }, []);
 
   useEffect(() => {
     const loadInitialData = async () => {
@@ -135,12 +160,12 @@ export default function WorkstationDashboard() {
     };
 
     loadInitialData();
-  }, []);
+  }, [fetchHistory, fetchPortfolio, fetchWatchlist]);
 
   // --- REAL-TIME SSE PRICE STREAM ---
   useEffect(() => {
     let eventSource: EventSource | null = null;
-    let reconnectTimeout: any = null;
+    let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 
     const connectSSE = () => {
       setSseStatus("reconnecting");
@@ -167,7 +192,7 @@ export default function WorkstationDashboard() {
 
       eventSource.onmessage = (event) => {
         try {
-          const pricesMap: Record<string, any> = JSON.parse(event.data);
+          const pricesMap = JSON.parse(event.data) as Record<string, PriceUpdate>;
           
           // Verify if price source is real or simulator
           const firstPrice = Object.values(pricesMap)[0];
@@ -242,7 +267,7 @@ export default function WorkstationDashboard() {
           // 3. Accumulate active chart ticks
           setTickHistory((prevHistory) => {
             const updated = { ...prevHistory };
-            Object.entries(pricesMap).forEach(([ticker, tick]: [string, any]) => {
+            Object.entries(pricesMap).forEach(([ticker, tick]) => {
               const prevList = updated[ticker] || [];
               const timeSec = Math.floor(tick.timestamp);
 
@@ -285,7 +310,7 @@ export default function WorkstationDashboard() {
     notional_amount?: number;
   }) => {
     try {
-      await apiRequest("/api/portfolio/trade", {
+      await apiRequest<unknown>("/api/portfolio/trade", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(trade),
@@ -295,15 +320,15 @@ export default function WorkstationDashboard() {
       await fetchPortfolio();
       await fetchWatchlist();
       await fetchHistory();
-    } catch (err: any) {
-      throw new Error(err.message || "Failed to execute trade transaction.");
+    } catch (err: unknown) {
+      throw new Error(getErrorMessage(err, "Failed to execute trade transaction."));
     }
   };
 
   // --- WATCHLIST ADD/DELETE HANDLERS ---
   const handleAddWatchlistTicker = async (ticker: string) => {
     try {
-      const data = await apiRequest("/api/watchlist", {
+      const data = await apiRequest<WatchlistItem[]>("/api/watchlist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ticker }),
@@ -311,22 +336,22 @@ export default function WorkstationDashboard() {
       setWatchlist(data);
       setActiveTicker(ticker);
       await fetchHistory(); // Pull history for newly added ticker
-    } catch (err: any) {
-      alert(err.message || `Failed to add ${ticker} to watchlist.`);
+    } catch (err: unknown) {
+      alert(getErrorMessage(err, `Failed to add ${ticker} to watchlist.`));
     }
   };
 
   const handleRemoveWatchlistTicker = async (ticker: string) => {
     try {
-      const data = await apiRequest(`/api/watchlist/${ticker}`, {
+      const data = await apiRequest<WatchlistItem[]>(`/api/watchlist/${ticker}`, {
         method: "DELETE",
       });
       setWatchlist(data);
       if (activeTicker === ticker && data.length > 0) {
         setActiveTicker(data[0].ticker);
       }
-    } catch (err: any) {
-      alert(err.message || `Failed to remove ${ticker} from watchlist.`);
+    } catch (err: unknown) {
+      alert(getErrorMessage(err, `Failed to remove ${ticker} from watchlist.`));
     }
   };
 
@@ -342,7 +367,7 @@ export default function WorkstationDashboard() {
     setIsThinking(true);
 
     try {
-      const res = await apiRequest("/api/chat", {
+      const res = await apiRequest<ChatResponse>("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: content }),
@@ -373,11 +398,11 @@ export default function WorkstationDashboard() {
         await fetchWatchlist();
         await fetchHistory();
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       const errorMsg: ChatMessage = {
         id: Math.random().toString(),
         role: "assistant",
-        content: `Error: ${err.message || "Failed to process chat agent."}`,
+        content: `Error: ${getErrorMessage(err, "Failed to process chat agent.")}`,
       };
       setChatMessages((prev) => [...prev, errorMsg]);
     } finally {
@@ -387,10 +412,10 @@ export default function WorkstationDashboard() {
 
   const handleClearChatHistory = async () => {
     try {
-      await apiRequest("/api/chat", { method: "DELETE" });
+      await apiRequest<unknown>("/api/chat", { method: "DELETE" });
       setChatMessages([]);
-    } catch (err: any) {
-      alert(err.message || "Failed to clear conversation history.");
+    } catch (err: unknown) {
+      alert(getErrorMessage(err, "Failed to clear conversation history."));
     }
   };
 
@@ -398,7 +423,7 @@ export default function WorkstationDashboard() {
   const activeTickerTicks = tickHistory[activeTicker] || [];
 
   return (
-    <div className="flex flex-col h-screen bg-[#0d1117] overflow-hidden text-[#f0f3f6]">
+    <div className="flex min-h-screen flex-col bg-[#0d1117] text-[#f0f3f6] lg:h-screen lg:overflow-hidden">
       {/* 1. Dynamic Header */}
       <Header
         portfolioValueCents={totalValueCents}
@@ -408,11 +433,11 @@ export default function WorkstationDashboard() {
       />
 
       {/* 2. Main Workstation 3-Column Grid */}
-      <div className="flex flex-1 overflow-hidden p-3 gap-3">
+      <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-3 lg:min-h-0 xl:flex-row xl:overflow-hidden">
         
         {/* Left Column: Watchlist & Order Trade Ticket */}
-        <div className="w-[320px] flex flex-col gap-3 shrink-0">
-          <div className="flex-1 min-h-0">
+        <div className="flex w-full shrink-0 flex-col gap-3 xl:w-[340px] xl:min-h-0">
+          <div className="min-h-[320px] xl:min-h-0 xl:flex-1">
             <Watchlist
               items={watchlist}
               activeTicker={activeTicker}
@@ -422,8 +447,9 @@ export default function WorkstationDashboard() {
               flashStates={flashStates}
             />
           </div>
-          <div className="h-[250px] shrink-0">
+          <div className="min-h-[260px] shrink-0 sm:min-h-[230px] xl:h-[270px] xl:min-h-0">
             <OrderTradeBar
+              key={activeTicker}
               activeTicker={activeTicker}
               positions={positions.map((p) => ({ ticker: p.ticker, quantity: p.quantity }))}
               onExecuteTrade={handleExecuteTrade}
@@ -432,29 +458,29 @@ export default function WorkstationDashboard() {
         </div>
 
         {/* Center Workspace: Active Chart, Portfolio Positions, and Heatmap Heatmap */}
-        <div className="flex-1 flex flex-col gap-3 min-w-0">
+        <div className="flex min-w-0 flex-1 flex-col gap-3 lg:min-h-0">
           {/* Upper Section: TV High-Performance Chart */}
-          <div className="flex-1 min-h-0">
+          <div className="min-h-[360px] lg:min-h-0 lg:flex-1">
             <MainChart ticker={activeTicker} ticks={activeTickerTicks} />
           </div>
           
           {/* Lower Section: Data Grids */}
-          <div className="h-[265px] shrink-0 grid grid-cols-5 gap-3">
-            <div className="col-span-3 min-h-0">
+          <div className="grid shrink-0 grid-cols-1 gap-3 lg:h-[265px] lg:min-h-0 lg:grid-cols-5">
+            <div className="min-h-[260px] lg:col-span-3 lg:min-h-0">
               <PositionsTable
                 positions={positions}
                 activeTicker={activeTicker}
                 onSelectTicker={setActiveTicker}
               />
             </div>
-            <div className="col-span-2 min-h-0">
+            <div className="min-h-[240px] lg:col-span-2 lg:min-h-0">
               <Treemap positions={positions} />
             </div>
           </div>
         </div>
 
         {/* Right Column: AI Co-Pilot Chat sidebar */}
-        <div className="w-[340px] shrink-0 min-h-0">
+        <div className="min-h-[420px] w-full shrink-0 xl:min-h-0 xl:w-[340px]">
           <AiChat
             messages={chatMessages}
             inputValue={chatInputValue}

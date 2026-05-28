@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { CreditCard, ShoppingBag, Trash, RefreshCw } from "lucide-react";
+import React, { useState } from "react";
+import { CreditCard, ShoppingBag, Trash } from "lucide-react";
 
 interface OrderTradeBarProps {
   activeTicker: string;
@@ -22,13 +22,6 @@ export default function OrderTradeBar({ activeTicker, positions, onExecuteTrade 
   const [errorMsg, setErrorMsg] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
 
-  // Sync with active ticker clicked in Watchlist/Positions
-  useEffect(() => {
-    setTicker(activeTicker);
-    setErrorMsg("");
-    setSuccessMsg("");
-  }, [activeTicker]);
-
   // Find held quantity for the current ticker
   const currentHolding = positions.find((p) => p.ticker === ticker.toUpperCase().trim())?.quantity || 0;
 
@@ -48,7 +41,7 @@ export default function OrderTradeBar({ activeTicker, positions, onExecuteTrade 
 
     setIsSubmitting(true);
     try {
-      const payload: any = { ticker: symbol, side };
+      const payload: Parameters<OrderTradeBarProps["onExecuteTrade"]>[0] = { ticker: symbol, side };
       if (mode === "shares") {
         payload.quantity = val;
       } else {
@@ -58,8 +51,8 @@ export default function OrderTradeBar({ activeTicker, positions, onExecuteTrade 
       await onExecuteTrade(payload);
       setSuccessMsg(`Successfully executed order: ${side.toUpperCase()} ${val} ${mode === "shares" ? "shares" : "$"} of ${symbol}`);
       setQuantity("");
-    } catch (err: any) {
-      setErrorMsg(err.message || `Failed to execute ${side} trade.`);
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : `Failed to execute ${side} trade.`);
     } finally {
       setIsSubmitting(false);
     }
@@ -87,8 +80,8 @@ export default function OrderTradeBar({ activeTicker, positions, onExecuteTrade 
       });
       setSuccessMsg(`Successfully sold all ${currentHolding} shares of ${symbol}.`);
       setQuantity("");
-    } catch (err: any) {
-      setErrorMsg(err.message || "Failed to execute sell-all order.");
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : "Failed to execute sell-all order.");
     } finally {
       setIsSubmitting(false);
     }
@@ -97,23 +90,23 @@ export default function OrderTradeBar({ activeTicker, positions, onExecuteTrade 
   return (
     <div className="flex flex-col h-full bg-[#161b22] border border-border-custom rounded-lg overflow-hidden select-none">
       {/* Panel Header */}
-      <div className="flex h-11 items-center justify-between border-b border-border-custom bg-[#0d1117]/80 px-4 shrink-0">
-        <div className="flex items-center space-x-2">
+      <div className="flex min-h-11 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border-custom bg-[#0d1117]/80 px-3 py-2 sm:flex-nowrap sm:px-4">
+        <div className="flex min-w-0 items-center space-x-2">
           <CreditCard className="w-4 h-4 text-blue-primary" />
-          <h2 className="text-xs font-bold tracking-wider text-gray-300 uppercase">
-            MANUAL TRADE TICKET
+          <h2 className="truncate text-xs font-bold tracking-wider text-gray-300 uppercase">
+            TRADE TICKET
           </h2>
         </div>
-        <span className="font-mono text-[9px] text-gray-500 tracking-wider">
+        <span className="hidden font-mono text-[9px] text-gray-500 tracking-wider 2xl:inline">
           FAST EXECUTION BAR
         </span>
       </div>
 
       {/* Ticket Body */}
-      <div className="flex-1 p-4 flex flex-col justify-between space-y-4">
+      <div className="flex-1 p-3 sm:p-4 flex flex-col justify-between space-y-4">
         <div className="space-y-3.5">
           {/* Ticker & Mode Row */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-2">
             <div>
               <label className="block text-[9px] font-bold text-gray-500 tracking-wider uppercase mb-1">
                 TICKER SYMBOL
@@ -158,7 +151,7 @@ export default function OrderTradeBar({ activeTicker, positions, onExecuteTrade 
 
           {/* Quantity & Current Holding Info */}
           <div>
-            <div className="flex items-center justify-between mb-1">
+            <div className="flex flex-wrap items-center justify-between gap-1 mb-1">
               <label className="text-[9px] font-bold text-gray-500 tracking-wider uppercase">
                 {mode === "shares" ? "QUANTITY (SHARES)" : "TRANSACTION VALUE (USD)"}
               </label>
