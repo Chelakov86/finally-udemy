@@ -131,8 +131,7 @@ async def lifespan(app: FastAPI):
     init_db()
 
     # 2. Create the shared global PriceCache
-    price_cache = PriceCache()
-    app.state.price_cache = price_cache
+    price_cache = app.state.price_cache
 
     # 3. Retrieve the union of all watchlist and position tickers from the DB
     with get_db_connection() as conn:
@@ -183,6 +182,7 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+app.state.price_cache = PriceCache()
 
 # Enable CORS for local cross-origin frontend development
 app.add_middleware(
@@ -273,12 +273,7 @@ app.include_router(market_router)
 app.include_router(watchlist_router)
 app.include_router(portfolio_router)
 app.include_router(chat_router)
-
-# Register SSE prices stream router (dynamically created with PriceCache reference)
-@app.on_event("startup")
-def mount_sse_router():
-    stream_router = create_stream_router(app.state.price_cache)
-    app.include_router(stream_router)
+app.include_router(create_stream_router(app.state.price_cache))
 
 
 # -------------------------------------------------------------

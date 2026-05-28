@@ -1,10 +1,11 @@
 import logging
-from fastapi import APIRouter, Request, HTTPException
+
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from app.db.connection import get_db_connection
 from app.chat.agent import handle_chat_message
 from app.chat.intent import PendingActionsCache
+from app.db.connection import get_db_connection
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 

@@ -24,21 +24,6 @@ class TradeRequest(BaseModel):
     source: Optional[str] = "manual"
 
 
-def get_fresh_price(price_cache, market_data_source, ticker: str) -> Decimal:
-    """
-    Fetches the price from PriceCache.
-    If ticker is unpriced, adds it to the market data source and waits briefly.
-    Verifies freshness (5s for simulator, 60s for Massive).
-    Raises HTTPException on stale or missing prices.
-    """
-    price_update = price_cache.get(ticker)
-    if not price_update:
-        # Ticker has no price, add to market data source
-        # We can't await inside a non-async function normally, but get_fresh_price
-        # is called from our async route, so let's make get_fresh_price async!
-        pass
-
-
 async def fetch_and_validate_fresh_price(price_cache, market_data_source, ticker: str) -> Decimal:
     price_update = price_cache.get(ticker)
     if not price_update:
@@ -406,7 +391,8 @@ async def execute_trade_logic(
         for pos in all_positions:
             pos_ticker = pos["ticker"]
             pos_qty = Decimal(str(pos["quantity"]))
-            pos_price = Decimal(str(price_cache.get_price(pos_ticker) or pos["avg_cost"]))
+            price_update = price_cache.get(pos_ticker)
+            pos_price = Decimal(str(price_update.price if price_update else pos["avg_cost"]))
             total_positions_cents += int(round(pos_qty * pos_price * 100))
 
         snapshot_val_cents = new_cash + total_positions_cents

@@ -202,8 +202,9 @@ async def execute_watchlist_change_from_ai(
     action = change.action
 
     try:
+        is_held = False
         with get_db_connection() as conn:
-            cursor = conn.conn.cursor() if hasattr(conn, "conn") else conn.cursor()
+            cursor = conn.cursor()
 
             if action == "add":
                 cursor.execute(
@@ -221,7 +222,6 @@ async def execute_watchlist_change_from_ai(
                         """,
                         (entry_id, ticker, now_str),
                     )
-                await market_data_source.add_ticker(ticker)
             else:  # remove
                 cursor.execute(
                     "SELECT quantity FROM positions WHERE user_id = 'default' AND ticker = ?;",
@@ -234,8 +234,11 @@ async def execute_watchlist_change_from_ai(
                     "DELETE FROM watchlist WHERE user_id = 'default' AND ticker = ?;",
                     (ticker,),
                 )
-                if not is_held:
-                    await market_data_source.remove_ticker(ticker)
+
+        if action == "add":
+            await market_data_source.add_ticker(ticker)
+        elif not is_held:
+            await market_data_source.remove_ticker(ticker)
 
         return {"ticker": ticker, "action": action, "status": "success"}
     except Exception as e:
