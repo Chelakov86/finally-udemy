@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0d1117;
+  --foreground: #f0f3f6;
+  --card-bg: #161b22;
+  --border-color: #30363d;
+  --accent-yellow: #ecad0a;
+  --blue-primary: #209dd7;
+  --purple-secondary: #753991;
+  --green-glow: #2ea043;
+  --red-glow: #f85149;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card-bg: var(--card-bg);
+  --color-border-custom: var(--border-color);
+  --color-accent-yellow: var(--accent-yellow);
+  --color-blue-primary: var(--blue-primary);
+  --color-purple-secondary: var(--purple-secondary);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-roboto-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), sans-serif;
+  min-height: 100vh;
+  margin: 0;
+}
+
+@media (min-width: 1024px) {
+  body {
+    overflow: hidden;
+    height: 100vh;
+  }
+}
+
+/* Custom scrollbars for a premium trading feel */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0d1117;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #30363d;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #8b949e;
+}
+
+/* Green and red price change flash animations */
+@keyframes flash-green {
+  0% {
+    background-color: rgba(46, 160, 67, 0.4);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+@keyframes flash-red {
+  0% {
+    background-color: rgba(248, 81, 73, 0.4);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.flash-up {
+  animation: flash-green 500ms ease-out forwards;
+}
+
+.flash-down {
+  animation: flash-red 500ms ease-out forwards;
+}
+

@@ -209,3 +209,9 @@ __marimo__/
 # Antigravity CLI
 .antigravitycli/
 
+# Local SQLite database
+db/*.db
+
+# Dependencies
+node_modules/
+

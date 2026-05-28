@@ -1,0 +1,15 @@
+services:
+  finally:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: finally-app
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount the local SQLite database directory for persistence
+      - ./db:/app/db
+    env_file:
+      # Pass through user configuration from local environment
+      - .env
+    restart: unless-stopped

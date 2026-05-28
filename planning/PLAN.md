@@ -68,7 +68,7 @@ The user runs a single Docker command (or a provided start script). A browser op
 - **Backend**: FastAPI (Python), managed as a `uv` project
 - **Database**: SQLite, single file at `db/finally.db`, volume-mounted for persistence
 - **Real-time data**: Server-Sent Events (SSE) — simpler than WebSockets, one-way server→client push, works everywhere
-- **AI integration**: LiteLLM → Google Gemini API using `gemma-4-31b-it`, with structured outputs for trade execution
+- **AI integration**: LiteLLM → Google Gemini API using `gemini/gemma-4-31b-it`, with structured outputs for trade execution
 - **Market data**: Environment-variable driven — simulator by default, real data via Massive API if key provided
 
 ### Why These Choices
@@ -133,8 +133,8 @@ MASSIVE_API_KEY=
 # Optional: Set to "true" for deterministic mock LLM responses (testing)
 LLM_MOCK=false
 
-# Optional: LiteLLM model identifier. Default is gemma-4-31b-it.
-LLM_MODEL=gemma-4-31b-it
+# Optional: LiteLLM model identifier. Default is gemini/gemma-4-31b-it.
+LLM_MODEL=gemini/gemma-4-31b-it
 
 # Optional but required before exposing the app on a public URL.
 # When set, the backend gates the UI and API behind a simple password check.
@@ -146,7 +146,7 @@ APP_PASSWORD=
 - If `MASSIVE_API_KEY` is set and non-empty → backend uses Massive REST API for market data
 - If `MASSIVE_API_KEY` is absent or empty → backend uses the built-in market simulator
 - If `LLM_MOCK=true` → backend returns deterministic mock LLM responses (for E2E tests)
-- If `LLM_MODEL` is set and non-empty → backend uses that LiteLLM model identifier; otherwise it defaults to `gemma-4-31b-it`
+- If `LLM_MODEL` is set and non-empty → backend uses that LiteLLM model identifier; otherwise it defaults to `gemini/gemma-4-31b-it`
 - If `APP_PASSWORD` is set and non-empty → backend requires the configured password before serving the UI or API. Do not deploy the app to a public URL without this or an equivalent auth proxy.
 - The backend reads `.env` from the project root (mounted into the container or read via docker `--env-file`)
 
@@ -330,7 +330,7 @@ When writing code to make calls to LLMs, use LiteLLM with Google Gemini via the 
 
 There is a `GEMINI_API_KEY` in the `.env` file in the project root.
 
-Use `gemma-4-31b-it` as the default LLM model. The actual LiteLLM model identifier must be read from `LLM_MODEL` so deployments can adjust provider routing or model availability without code changes.
+Use `gemini/gemma-4-31b-it` as the default LLM model. The actual LiteLLM model identifier must be read from `LLM_MODEL` so deployments can adjust provider routing or model availability without code changes.
 
 ### How It Works
 
