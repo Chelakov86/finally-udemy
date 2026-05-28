@@ -229,6 +229,11 @@ async def app_password_gate(request: Request, call_next):
     if cookie_password == app_password:
         return await call_next(request)
 
+    # 4. Verify app_password query param for EventSource, which cannot send custom headers.
+    query_password = request.query_params.get("app_password", "")
+    if query_password == app_password:
+        return await call_next(request)
+
     # If auth validation fails, reject with 401 Unauthorized
     return JSONResponse(
         status_code=401,
@@ -290,6 +295,9 @@ async def serve_static_or_index(catchall: str):
     If the requested path represents a file (e.g. JS/CSS/image), it is served directly.
     Otherwise, index.html is served to support clean client-side dynamic routing.
     """
+    if catchall.startswith("api/"):
+        raise HTTPException(status_code=404, detail="API endpoint not found.")
+
     # 1. Look for matching file inside backend/static/
     file_path = static_dir / catchall
     if file_path.exists() and file_path.is_file():
